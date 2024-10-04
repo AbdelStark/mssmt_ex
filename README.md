@@ -2,6 +2,8 @@
 
 A Merkle-Sum Sparse Merkle tree (MS-SMT) is a specific variant of a Merkle tree that combines a Merkle sum tree and a Sparse Merkle tree. As any merkle root, the MS-SMT can store a huge amount of data, and you only have store the Hash, an ideal candidate to store and trace user created assets.
 
+See [this](https://learn.royllo.org/taproot-assets/merkle-sum-sparse-merkle-tree/) for more information.
+
 ## Installation
 
 To use MS-SMT in your Elixir project, add it to your list of dependencies in `mix.exs`:
