@@ -10,6 +10,14 @@ defmodule MSSMT.MixProject do
       description: "An Elixir implementation of a Merkle-Sum Sparse Merkle Tree (MS-SMT).",
       package: package(),
       deps: deps(),
+      test_coverage: [tool: ExCoveralls],
+      preferred_cli_env: [
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.post": :test,
+        "coveralls.html": :test,
+        bench: :dev
+      ],
       name: "MSSMT",
       source_url: "https://github.com/AbdelStark/mssmt",
       homepage_url: "https://github.com/AbdelStark/mssmt",
@@ -28,8 +36,9 @@ defmodule MSSMT.MixProject do
 
   defp deps do
     [
-      {:ex_doc, "~> 0.28", only: :dev, runtime: false},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:excoveralls, "~> 0.18", only: :test},
+      {:ex_doc, "~> 0.28", only: :dev, runtime: false}
     ]
   end
 

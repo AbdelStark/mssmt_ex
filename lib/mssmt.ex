@@ -1,105 +1,10 @@
-defmodule MSSMT.NodeHash do
-  @moduledoc false
-  @type t :: <<_::256>>
-  @hash_size 32
-
-  @spec zero() :: t()
-  def zero(), do: :binary.copy(<<0>>, @hash_size)
-end
-
-defprotocol MSSMT.Node do
-  @spec node_hash(t()) :: MSSMT.NodeHash.t()
-  def node_hash(node)
-
-  @spec node_sum(t()) :: non_neg_integer()
-  def node_sum(node)
-
-  @spec copy(t()) :: t()
-  def copy(node)
-end
-
-defmodule MSSMT.LeafNode do
-  alias MSSMT.NodeHash
-
-  defstruct [:key, :value, :sum, :node_hash]
-
-  @type t :: %__MODULE__{
-          key: <<_::256>>,
-          value: binary(),
-          sum: non_neg_integer(),
-          node_hash: NodeHash.t() | nil
-        }
-
-  def new(key, value, sum) do
-    %__MODULE__{key: key, value: value, sum: sum}
-  end
-
-  def compute_hash(%__MODULE__{value: value, sum: sum}) do
-    :crypto.hash(:sha256, value <> <<sum::unsigned-little-64>>)
-  end
-end
-
-defimpl MSSMT.Node, for: MSSMT.LeafNode do
-  def node_hash(%{node_hash: nil} = leaf) do
-    hash = MSSMT.LeafNode.compute_hash(leaf)
-    %{leaf | node_hash: hash}
-    hash
-  end
-
-  def node_hash(%{node_hash: hash}), do: hash
-
-  def node_sum(%{sum: sum}), do: sum
-
-  def copy(leaf), do: %{leaf | node_hash: nil}
-end
-
-defmodule MSSMT.BranchNode do
-  alias MSSMT.{Node, NodeHash}
-
-  defstruct [:left, :right, :node_hash, :sum]
-
-  @type t :: %__MODULE__{
-          left: Node.t(),
-          right: Node.t(),
-          node_hash: NodeHash.t() | nil,
-          sum: non_neg_integer() | nil
-        }
-
-  def new(left, right) do
-    %__MODULE__{left: left, right: right}
-  end
-
-  def compute_hash(%__MODULE__{left: left, right: right} = branch) do
-    sum = Node.node_sum(branch)
-
-    :crypto.hash(
-      :sha256,
-      Node.node_hash(left) <> Node.node_hash(right) <> <<sum::unsigned-little-64>>
-    )
-  end
-end
-
-defimpl MSSMT.Node, for: MSSMT.BranchNode do
-  def node_hash(%{node_hash: nil} = branch) do
-    hash = MSSMT.BranchNode.compute_hash(branch)
-    %{branch | node_hash: hash}
-    hash
-  end
-
-  def node_hash(%{node_hash: hash}), do: hash
-
-  def node_sum(%{sum: nil, left: left, right: right} = branch) do
-    sum = MSSMT.Node.node_sum(left) + MSSMT.Node.node_sum(right)
-    %{branch | sum: sum}
-    sum
-  end
-
-  def node_sum(%{sum: sum}), do: sum
-
-  def copy(branch), do: %{branch | node_hash: nil, sum: nil}
-end
-
 defmodule MSSMT do
+  @moduledoc """
+  Merkle Sum Sparse Merkle Tree (MSSMT) implementation.
+
+  Provides functions to create, insert, retrieve, delete, and verify elements in the MSSMT.
+  """
+
   @hash_size 32
   @max_tree_height @hash_size * 8
 
@@ -107,8 +12,41 @@ defmodule MSSMT do
 
   import Bitwise
 
+  @doc """
+  Creates a new empty MSSMT.
+
+  ## Examples
+
+      iex> _tree = MSSMT.new()
+      nil
+
+  """
+  @spec new() :: nil
   def new(), do: nil
 
+  @doc """
+  Inserts a key-value pair with an associated sum into the MSSMT.
+
+  ## Parameters
+
+    - `tree`: The current tree.
+    - `key`: The key to insert (256-bit binary).
+    - `value`: The value associated with the key.
+    - `sum`: The sum associated with the key.
+
+  ## Examples
+
+      iex> tree = MSSMT.new()
+      iex> key = :crypto.strong_rand_bytes(32)
+      iex> {:ok, tree} = MSSMT.insert(tree, key, "value", 100)
+      iex> {:ok, value, sum} = MSSMT.get(tree, key)
+      iex> value
+      "value"
+      iex> sum
+      100
+
+  """
+  @spec insert(Node.t() | nil, <<_::256>>, binary(), non_neg_integer()) :: {:ok, Node.t()}
   def insert(tree, key, value, sum) when byte_size(key) == @hash_size do
     leaf = LeafNode.new(key, value, sum)
     {:ok, do_insert(tree, key, leaf, 0)}
@@ -145,6 +83,28 @@ defmodule MSSMT do
     end
   end
 
+  @doc """
+  Retrieves the value and sum associated with a key in the MSSMT.
+
+  ## Parameters
+
+    - `tree`: The current tree.
+    - `key`: The key to retrieve (256-bit binary).
+
+  ## Examples
+
+      iex> tree = MSSMT.new()
+      iex> key = :crypto.strong_rand_bytes(32)
+      iex> {:ok, tree} = MSSMT.insert(tree, key, "value", 100)
+      iex> {:ok, value, sum} = MSSMT.get(tree, key)
+      iex> value
+      "value"
+      iex> sum
+      100
+
+  """
+  @spec get(Node.t() | nil, <<_::256>>) ::
+          {:ok, binary(), non_neg_integer()} | {:error, :not_found}
   def get(tree, key) when byte_size(key) == @hash_size do
     do_get(tree, key, 0)
   end
@@ -167,6 +127,25 @@ defmodule MSSMT do
     end
   end
 
+  @doc """
+  Generates a Merkle proof for a given key.
+
+  ## Parameters
+
+    - `tree`: The current tree.
+    - `key`: The key to generate the proof for (256-bit binary).
+
+  ## Examples
+
+      iex> tree = MSSMT.new()
+      iex> key = :crypto.strong_rand_bytes(32)
+      iex> {:ok, tree} = MSSMT.insert(tree, key, "value", 100)
+      iex> proof = MSSMT.merkle_proof(tree, key)
+      iex> is_list(proof)
+      true
+
+  """
+  @spec merkle_proof(Node.t() | nil, <<_::256>>) :: [Node.t()]
   def merkle_proof(tree, key) when byte_size(key) == @hash_size do
     {proof_nodes, _} = do_merkle_proof(tree, key, 0, [])
     Enum.reverse(proof_nodes)
@@ -184,6 +163,30 @@ defmodule MSSMT do
     end
   end
 
+  @doc """
+  Verifies a Merkle proof against a root hash.
+
+  ## Parameters
+
+    - `root_hash`: The root hash of the MSSMT.
+    - `key`: The key the proof is for (256-bit binary).
+    - `value`: The value associated with the key.
+    - `sum`: The sum associated with the key.
+    - `proof`: The Merkle proof as a list of sibling nodes.
+
+  ## Examples
+
+      iex> tree = MSSMT.new()
+      iex> key = :crypto.strong_rand_bytes(32)
+      iex> {:ok, tree} = MSSMT.insert(tree, key, "value", 100)
+      iex> proof = MSSMT.merkle_proof(tree, key)
+      iex> root_hash = MSSMT.root_hash(tree)
+      iex> MSSMT.verify_proof(root_hash, key, "value", 100, proof)
+      true
+
+  """
+  @spec verify_proof(NodeHash.t(), <<_::256>>, binary(), non_neg_integer(), [Node.t()]) ::
+          boolean()
   def verify_proof(root_hash, key, value, sum, proof) when byte_size(key) == @hash_size do
     leaf = LeafNode.new(key, value, sum)
     leaf_hash = Node.node_hash(leaf)
@@ -214,12 +217,58 @@ defmodule MSSMT do
     computed_hash == root_hash
   end
 
+  @doc """
+  Returns the root hash of the MSSMT.
+
+  ## Examples
+
+      iex> tree = MSSMT.new()
+      iex> root_hash = MSSMT.root_hash(tree)
+      iex> root_hash == <<0::256>>
+      true
+
+  """
+  @spec root_hash(Node.t() | nil) :: NodeHash.t()
   def root_hash(nil), do: NodeHash.zero()
   def root_hash(tree), do: Node.node_hash(tree)
 
+  @doc """
+  Returns the total sum of all nodes in the MSSMT.
+
+  ## Examples
+
+      iex> tree = MSSMT.new()
+      iex> key1 = :crypto.strong_rand_bytes(32)
+      iex> key2 = :crypto.strong_rand_bytes(32)
+      iex> {:ok, tree} = MSSMT.insert(tree, key1, "value1", 100)
+      iex> {:ok, tree} = MSSMT.insert(tree, key2, "value2", 200)
+      iex> MSSMT.total_sum(tree)
+      300
+
+  """
+  @spec total_sum(Node.t() | nil) :: non_neg_integer()
   def total_sum(nil), do: 0
   def total_sum(tree), do: Node.node_sum(tree)
 
+  @doc """
+  Deletes a key from the MSSMT.
+
+  ## Parameters
+
+    - `tree`: The current tree.
+    - `key`: The key to delete (256-bit binary).
+
+  ## Examples
+
+      iex> tree = MSSMT.new()
+      iex> key = :crypto.strong_rand_bytes(32)
+      iex> {:ok, tree} = MSSMT.insert(tree, key, "value", 100)
+      iex> {:ok, tree} = MSSMT.delete(tree, key)
+      iex> MSSMT.get(tree, key)
+      {:error, :not_found}
+
+  """
+  @spec delete(Node.t() | nil, <<_::256>>) :: {:ok, Node.t() | nil} | {:error, :not_found}
   def delete(tree, key) when byte_size(key) == @hash_size do
     case do_delete(tree, key, 0) do
       {:ok, new_tree} -> {:ok, new_tree}
@@ -251,6 +300,7 @@ defmodule MSSMT do
     end
   end
 
+  defp maybe_collapse(%BranchNode{left: nil, right: nil}), do: nil
   defp maybe_collapse(%BranchNode{left: nil, right: right}), do: right
   defp maybe_collapse(%BranchNode{left: left, right: nil}), do: left
   defp maybe_collapse(branch), do: branch

@@ -1,4 +1,8 @@
 defmodule MSSMTTest do
+  @moduledoc """
+  Test suite for the MSSMT module.
+  """
+
   use ExUnit.Case
   doctest MSSMT
 
