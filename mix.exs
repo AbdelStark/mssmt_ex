@@ -15,7 +15,7 @@ defmodule MSSMT.MixProject do
       homepage_url: "https://github.com/AbdelStark/mssmt",
       docs: [
         main: "MSSMT",
-        extras: ["README.md"]
+        extras: ["README.md", "LICENSE"]
       ]
     ]
   end

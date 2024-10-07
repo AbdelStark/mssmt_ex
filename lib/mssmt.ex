@@ -17,7 +17,18 @@ defmodule MSSMT do
     - `hash`: The cryptographic hash of the node.
     - `sum`: The cumulative sum of values from the leaves up to this node.
     """
+
     defstruct [:key, :value, :hash, :sum]
+
+    @typedoc """
+    The `MSSMT.Node` struct represents a node in the Merkle-Sum Sparse Merkle Tree.
+    """
+    @type t :: %__MODULE__{
+            key: binary(),
+            value: number() | nil,
+            hash: binary(),
+            sum: number()
+          }
   end
 
   @doc """
