@@ -1,282 +1,264 @@
-defmodule MSSMT do
-  @moduledoc """
-  Implementation of a Merkle-Sum Sparse Merkle Tree (MS-SMT).
+defmodule MSSMT.NodeHash do
+  @moduledoc false
+  @type t :: <<_::256>>
+  @hash_size 32
 
-  A MS-SMT is a data structure that combines the features of a Merkle tree
-  and a sum tree, allowing for efficient proofs of inclusion and accumulation
-  of values.
-  """
+  @spec zero() :: t()
+  def zero(), do: :binary.copy(<<0>>, @hash_size)
+end
 
-  defmodule Node do
-    @moduledoc """
-    Represents a node in the MS-SMT.
+defprotocol MSSMT.Node do
+  @spec node_hash(t()) :: MSSMT.NodeHash.t()
+  def node_hash(node)
 
-    Each node contains:
-    - `key`: The unique identifier for the leaf node.
-    - `value`: The value associated with the key.
-    - `hash`: The cryptographic hash of the node.
-    - `sum`: The cumulative sum of values from the leaves up to this node.
-    """
+  @spec node_sum(t()) :: non_neg_integer()
+  def node_sum(node)
 
-    defstruct [:key, :value, :hash, :sum]
+  @spec copy(t()) :: t()
+  def copy(node)
+end
 
-    @typedoc """
-    The `MSSMT.Node` struct represents a node in the Merkle-Sum Sparse Merkle Tree.
-    """
-    @type t :: %__MODULE__{
-            key: binary(),
-            value: number() | nil,
-            hash: binary(),
-            sum: number()
-          }
-  end
+defmodule MSSMT.LeafNode do
+  alias MSSMT.NodeHash
 
-  @doc """
-  Creates a new empty MS-SMT.
-  """
-  @spec new() :: map()
-  def new do
-    %{}
-  end
+  defstruct [:key, :value, :sum, :node_hash]
 
-  @doc """
-  Inserts a key-value pair into the MS-SMT.
-
-  ## Examples
-
-      iex> tree = MSSMT.new()
-      iex> tree = MSSMT.insert(tree, "key1", 100)
-      iex> MSSMT.get(tree, "key1")
-      100
-
-  """
-  @spec insert(map(), binary(), number()) :: map()
-  def insert(tree, key, value) when is_binary(key) and is_number(value) do
-    node = %Node{
-      key: key,
-      value: value,
-      hash: leaf_hash(key, value),
-      sum: value
-    }
-
-    Map.put(tree, key, node)
-  end
-
-  @doc """
-  Retrieves the value associated with a key from the MS-SMT.
-
-  Returns `nil` if the key does not exist.
-
-  ## Examples
-
-      iex> tree = MSSMT.new()
-      iex> MSSMT.get(tree, "nonexistent_key")
-      nil
-
-  """
-  @spec get(map(), binary()) :: number() | nil
-  def get(tree, key) when is_binary(key) do
-    case Map.get(tree, key) do
-      nil -> nil
-      node -> node.value
-    end
-  end
-
-  @doc """
-  Updates the value associated with a key in the MS-SMT.
-
-  If the key does not exist, the tree remains unchanged.
-
-  ## Examples
-
-      iex> tree = MSSMT.new()
-      iex> tree = MSSMT.insert(tree, "key1", 100)
-      iex> tree = MSSMT.update(tree, "key1", 200)
-      iex> MSSMT.get(tree, "key1")
-      200
-
-  """
-  @spec update(map(), binary(), number()) :: map()
-  def update(tree, key, value) when is_binary(key) and is_number(value) do
-    case Map.get(tree, key) do
-      nil ->
-        tree
-
-      node ->
-        updated_node = %Node{
-          node
-          | value: value,
-            hash: leaf_hash(key, value),
-            sum: value
+  @type t :: %__MODULE__{
+          key: <<_::256>>,
+          value: binary(),
+          sum: non_neg_integer(),
+          node_hash: NodeHash.t() | nil
         }
 
-        Map.put(tree, key, updated_node)
-    end
+  def new(key, value, sum) do
+    %__MODULE__{key: key, value: value, sum: sum}
   end
 
-  @doc """
-  Deletes a key-value pair from the MS-SMT.
+  def compute_hash(%__MODULE__{value: value, sum: sum}) do
+    :crypto.hash(:sha256, value <> <<sum::unsigned-little-64>>)
+  end
+end
 
-  ## Examples
-
-      iex> tree = MSSMT.new()
-      iex> tree = MSSMT.insert(tree, "key1", 100)
-      iex> tree = MSSMT.delete(tree, "key1")
-      iex> MSSMT.get(tree, "key1")
-      nil
-
-  """
-  @spec delete(map(), binary()) :: map()
-  def delete(tree, key) when is_binary(key) do
-    Map.delete(tree, key)
+defimpl MSSMT.Node, for: MSSMT.LeafNode do
+  def node_hash(%{node_hash: nil} = leaf) do
+    hash = MSSMT.LeafNode.compute_hash(leaf)
+    %{leaf | node_hash: hash}
+    hash
   end
 
-  @doc """
-  Calculates the root hash of the MS-SMT.
+  def node_hash(%{node_hash: hash}), do: hash
 
-  The root hash is a cryptographic representation of the entire tree state.
+  def node_sum(%{sum: sum}), do: sum
 
-  ## Examples
+  def copy(leaf), do: %{leaf | node_hash: nil}
+end
 
-      iex> tree = MSSMT.new()
-      iex> tree = MSSMT.insert(tree, "key1", 100)
-      iex> root_hash = MSSMT.root_hash(tree)
-      iex> byte_size(root_hash)
-      32
+defmodule MSSMT.BranchNode do
+  alias MSSMT.{Node, NodeHash}
 
-  """
-  @spec root_hash(map()) :: binary() | nil
-  def root_hash(tree) do
-    tree
-    |> Map.values()
-    |> Enum.sort_by(& &1.key)
-    |> calculate_root_hash()
+  defstruct [:left, :right, :node_hash, :sum]
+
+  @type t :: %__MODULE__{
+          left: Node.t(),
+          right: Node.t(),
+          node_hash: NodeHash.t() | nil,
+          sum: non_neg_integer() | nil
+        }
+
+  def new(left, right) do
+    %__MODULE__{left: left, right: right}
   end
 
-  @doc """
-  Calculates the total sum of all values in the MS-SMT.
+  def compute_hash(%__MODULE__{left: left, right: right} = branch) do
+    sum = Node.node_sum(branch)
 
-  ## Examples
-
-      iex> tree = MSSMT.new()
-      iex> tree = MSSMT.insert(tree, "key1", 100)
-      iex> tree = MSSMT.insert(tree, "key2", 200)
-      iex> MSSMT.total_sum(tree)
-      300
-
-  """
-  @spec total_sum(map()) :: number()
-  def total_sum(tree) do
-    tree
-    |> Map.values()
-    |> Enum.reduce(0, fn node, acc -> acc + node.sum end)
-  end
-
-  @doc """
-  Generates a proof of inclusion for a given key.
-
-  The proof consists of the necessary sibling nodes to reconstruct the root hash.
-
-  ## Examples
-
-      iex> tree = MSSMT.new()
-      iex> tree = MSSMT.insert(tree, "key1", 100)
-      iex> proof = MSSMT.generate_proof(tree, "key1")
-      iex> is_list(proof)
-      true
-
-  """
-  @spec generate_proof(map(), binary()) :: list(Node.t())
-  def generate_proof(tree, key) when is_binary(key) do
-    sorted_nodes = tree |> Map.values() |> Enum.sort_by(& &1.key)
-    do_generate_proof(sorted_nodes, key, [])
-  end
-
-  defp do_generate_proof([], _key, proof), do: Enum.reverse(proof)
-
-  defp do_generate_proof([%Node{key: node_key} = node | rest], key, proof) do
-    if node_key == key do
-      Enum.reverse(proof) ++ rest
-    else
-      do_generate_proof(rest, key, [node | proof])
-    end
-  end
-
-  @doc """
-  Verifies a proof of inclusion for a given key and value.
-
-  Returns `true` if the proof is valid, `false` otherwise.
-
-  ## Examples
-
-      iex> tree = MSSMT.new()
-      iex> tree = MSSMT.insert(tree, "key1", 100)
-      iex> root_hash = MSSMT.root_hash(tree)
-      iex> proof = MSSMT.generate_proof(tree, "key1")
-      iex> MSSMT.verify_proof(root_hash, "key1", 100, proof)
-      true
-
-  """
-  @spec verify_proof(binary() | nil, binary(), number(), list(Node.t())) :: boolean()
-  def verify_proof(root_hash, key, value, proof) when is_binary(key) and is_number(value) do
-    leaf = %Node{
-      key: key,
-      value: value,
-      hash: leaf_hash(key, value),
-      sum: value
-    }
-
-    nodes = [leaf | proof] |> Enum.sort_by(& &1.key)
-    calculated_hash = calculate_root_hash(nodes)
-    calculated_hash == root_hash
-  end
-
-  # Private helper functions
-
-  @doc false
-  @spec leaf_hash(binary(), number()) :: binary()
-  defp leaf_hash(key, value) when is_binary(key) and is_number(value) do
-    :crypto.hash(:sha256, key <> :erlang.term_to_binary(value))
-  end
-
-  @doc false
-  @spec calculate_root_hash([Node.t()]) :: binary() | nil
-  defp calculate_root_hash([]), do: nil
-
-  defp calculate_root_hash([single_node]) do
-    single_node.hash
-  end
-
-  defp calculate_root_hash(nodes) when length(nodes) > 1 do
-    nodes
-    |> Enum.chunk_every(2)
-    |> Enum.map(&merge_nodes/1)
-    |> calculate_root_hash()
-  end
-
-  @doc false
-  @spec merge_nodes([Node.t()]) :: Node.t()
-  defp merge_nodes([left, right]) do
-    combined_hash = hash_nodes(left, right)
-    combined_sum = left.sum + right.sum
-
-    %Node{
-      key: left.key,
-      hash: combined_hash,
-      sum: combined_sum
-    }
-  end
-
-  defp merge_nodes([single]) do
-    single
-  end
-
-  @doc false
-  @spec hash_nodes(Node.t(), Node.t()) :: binary()
-  defp hash_nodes(left, right) do
     :crypto.hash(
       :sha256,
-      left.hash <> <<left.sum::64>> <> right.hash <> <<right.sum::64>>
+      Node.node_hash(left) <> Node.node_hash(right) <> <<sum::unsigned-little-64>>
     )
+  end
+end
+
+defimpl MSSMT.Node, for: MSSMT.BranchNode do
+  def node_hash(%{node_hash: nil} = branch) do
+    hash = MSSMT.BranchNode.compute_hash(branch)
+    %{branch | node_hash: hash}
+    hash
+  end
+
+  def node_hash(%{node_hash: hash}), do: hash
+
+  def node_sum(%{sum: nil, left: left, right: right} = branch) do
+    sum = MSSMT.Node.node_sum(left) + MSSMT.Node.node_sum(right)
+    %{branch | sum: sum}
+    sum
+  end
+
+  def node_sum(%{sum: sum}), do: sum
+
+  def copy(branch), do: %{branch | node_hash: nil, sum: nil}
+end
+
+defmodule MSSMT do
+  @hash_size 32
+  @max_tree_height @hash_size * 8
+
+  alias MSSMT.{LeafNode, BranchNode, NodeHash, Node}
+
+  import Bitwise
+
+  def new(), do: nil
+
+  def insert(tree, key, value, sum) when byte_size(key) == @hash_size do
+    leaf = LeafNode.new(key, value, sum)
+    {:ok, do_insert(tree, key, leaf, 0)}
+  end
+
+  defp do_insert(nil, _key, leaf, _height), do: leaf
+
+  defp do_insert(%LeafNode{key: existing_key} = existing_leaf, key, new_leaf, height) do
+    cond do
+      existing_key == key ->
+        new_leaf
+
+      height >= @max_tree_height ->
+        raise "Cannot split nodes further, keys are identical"
+
+      true ->
+        split_node(existing_leaf, new_leaf, height)
+    end
+  end
+
+  defp do_insert(%BranchNode{left: left, right: right}, key, leaf, height) do
+    if get_bit(key, height) == 0 do
+      BranchNode.new(do_insert(left, key, leaf, height + 1), right)
+    else
+      BranchNode.new(left, do_insert(right, key, leaf, height + 1))
+    end
+  end
+
+  defp split_node(leaf1, leaf2, height) do
+    if get_bit(leaf1.key, height) == 0 do
+      BranchNode.new(leaf1, leaf2)
+    else
+      BranchNode.new(leaf2, leaf1)
+    end
+  end
+
+  def get(tree, key) when byte_size(key) == @hash_size do
+    do_get(tree, key, 0)
+  end
+
+  defp do_get(nil, _key, _height), do: {:error, :not_found}
+
+  defp do_get(%LeafNode{key: leaf_key, value: value, sum: sum}, key, _height) do
+    if leaf_key == key do
+      {:ok, value, sum}
+    else
+      {:error, :not_found}
+    end
+  end
+
+  defp do_get(%BranchNode{left: left, right: right}, key, height) do
+    if get_bit(key, height) == 0 do
+      do_get(left, key, height + 1)
+    else
+      do_get(right, key, height + 1)
+    end
+  end
+
+  def merkle_proof(tree, key) when byte_size(key) == @hash_size do
+    {proof_nodes, _} = do_merkle_proof(tree, key, 0, [])
+    Enum.reverse(proof_nodes)
+  end
+
+  defp do_merkle_proof(nil, _key, _height, acc), do: {acc, nil}
+
+  defp do_merkle_proof(%LeafNode{} = leaf, _key, _height, acc), do: {acc, leaf}
+
+  defp do_merkle_proof(%BranchNode{left: left, right: right}, key, height, acc) do
+    if get_bit(key, height) == 0 do
+      do_merkle_proof(left, key, height + 1, [right | acc])
+    else
+      do_merkle_proof(right, key, height + 1, [left | acc])
+    end
+  end
+
+  def verify_proof(root_hash, key, value, sum, proof) when byte_size(key) == @hash_size do
+    leaf = LeafNode.new(key, value, sum)
+    leaf_hash = Node.node_hash(leaf)
+
+    {computed_hash, _} =
+      Enum.reduce(Enum.with_index(proof), {leaf_hash, sum}, fn {sibling, height},
+                                                               {current_hash, current_sum} ->
+        sibling_hash = Node.node_hash(sibling)
+        sibling_sum = Node.node_sum(sibling)
+
+        if get_bit(key, height) == 0 do
+          new_sum = current_sum + sibling_sum
+
+          new_hash =
+            :crypto.hash(:sha256, current_hash <> sibling_hash <> <<new_sum::unsigned-little-64>>)
+
+          {new_hash, new_sum}
+        else
+          new_sum = sibling_sum + current_sum
+
+          new_hash =
+            :crypto.hash(:sha256, sibling_hash <> current_hash <> <<new_sum::unsigned-little-64>>)
+
+          {new_hash, new_sum}
+        end
+      end)
+
+    computed_hash == root_hash
+  end
+
+  def root_hash(nil), do: NodeHash.zero()
+  def root_hash(tree), do: Node.node_hash(tree)
+
+  def total_sum(nil), do: 0
+  def total_sum(tree), do: Node.node_sum(tree)
+
+  def delete(tree, key) when byte_size(key) == @hash_size do
+    case do_delete(tree, key, 0) do
+      {:ok, new_tree} -> {:ok, new_tree}
+      :not_found -> {:error, :not_found}
+    end
+  end
+
+  defp do_delete(nil, _key, _height), do: :not_found
+
+  defp do_delete(%LeafNode{key: leaf_key}, key, _height) do
+    if leaf_key == key do
+      {:ok, nil}
+    else
+      :not_found
+    end
+  end
+
+  defp do_delete(%BranchNode{left: left, right: right}, key, height) do
+    if get_bit(key, height) == 0 do
+      case do_delete(left, key, height + 1) do
+        {:ok, new_left} -> {:ok, maybe_collapse(BranchNode.new(new_left, right))}
+        :not_found -> :not_found
+      end
+    else
+      case do_delete(right, key, height + 1) do
+        {:ok, new_right} -> {:ok, maybe_collapse(BranchNode.new(left, new_right))}
+        :not_found -> :not_found
+      end
+    end
+  end
+
+  defp maybe_collapse(%BranchNode{left: nil, right: right}), do: right
+  defp maybe_collapse(%BranchNode{left: left, right: nil}), do: left
+  defp maybe_collapse(branch), do: branch
+
+  defp get_bit(key, index) do
+    byte_index = div(index, 8)
+    bit_index = rem(index, 8)
+    <<_::size(byte_index)-bytes, byte::8, _::binary>> = key
+    byte >>> (7 - bit_index) &&& 1
   end
 end
