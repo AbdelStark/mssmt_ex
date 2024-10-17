@@ -8,7 +8,7 @@ defmodule MSSMT do
   @hash_size 32
   @max_tree_height @hash_size * 8
 
-  alias MSSMT.{LeafNode, BranchNode, NodeHash, Node}
+  alias MSSMT.{BranchNode, LeafNode, Node, NodeHash}
 
   import Bitwise
 
@@ -22,7 +22,7 @@ defmodule MSSMT do
 
   """
   @spec new() :: nil
-  def new(), do: nil
+  def new, do: nil
 
   @doc """
   Inserts a key-value pair with an associated sum into the MSSMT.

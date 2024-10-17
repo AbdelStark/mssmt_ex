@@ -16,5 +16,5 @@ defmodule MSSMT.NodeHash do
 
   """
   @spec zero() :: t()
-  def zero(), do: :binary.copy(<<0>>, @hash_size)
+  def zero, do: :binary.copy(<<0>>, @hash_size)
 end
