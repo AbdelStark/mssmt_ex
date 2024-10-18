@@ -4,7 +4,7 @@ defmodule MSSMT.MixProject do
   def project do
     [
       app: :mssmt,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
       description: "An Elixir implementation of a Merkle-Sum Sparse Merkle Tree (MS-SMT).",

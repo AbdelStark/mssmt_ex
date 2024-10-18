@@ -11,17 +11,15 @@ This Elixir implementation provides a simple and efficient MS-SMT library for us
   - [Installation](#installation)
   - [Usage](#usage)
     - [Basic Operations](#basic-operations)
-    - [Handling Binary Keys of Different Lengths](#handling-binary-keys-of-different-lengths)
     - [Generating and Verifying Proofs](#generating-and-verifying-proofs)
   - [API Reference](#api-reference)
     - [MSSMT.new/0](#mssmtnew0)
     - [MSSMT.insert/3](#mssmtinsert3)
     - [MSSMT.get/2](#mssmtget2)
-    - [MSSMT.update/3](#mssmtupdate3)
     - [MSSMT.delete/2](#mssmtdelete2)
     - [MSSMT.root\_hash/1](#mssmtroot_hash1)
     - [MSSMT.total\_sum/1](#mssmttotal_sum1)
-    - [MSSMT.generate\_proof/2](#mssmtgenerate_proof2)
+    - [MSSMT.merkle\_proof/2](#mssmtmerkle_proof2)
     - [MSSMT.verify\_proof/4](#mssmtverify_proof4)
   - [Development](#development)
   - [Contributing](#contributing)
@@ -57,17 +55,16 @@ import MSSMT
 tree = MSSMT.new()
 
 # Insert key-value pairs
-tree = MSSMT.insert(tree, <<1, 2, 3>>, 100)
-tree = MSSMT.insert(tree, <<4, 5, 6>>, 200)
+key1 = :crypto.strong_rand_bytes(32)
+key2 = :crypto.strong_rand_bytes(32)
+tree = MSSMT.insert(tree, key1, "value1", 100)
+tree = MSSMT.insert(tree, key2, "value2", 200)
 
 # Retrieve a value
-value = MSSMT.get(tree, <<1, 2, 3>>)  # Returns 100
-
-# Update a value
-tree = MSSMT.update(tree, <<1, 2, 3>>, 150)
+{:ok, retrieved_value, retrieved_sum} = MSSMT.get(tree, key)
 
 # Delete a key-value pair
-tree = MSSMT.delete(tree, <<4, 5, 6>>)
+{:ok, tree} = MSSMT.delete(tree, key1)
 
 # Calculate root hash
 root_hash = MSSMT.root_hash(tree)  # Returns a 32-byte binary hash
@@ -76,39 +73,29 @@ root_hash = MSSMT.root_hash(tree)  # Returns a 32-byte binary hash
 total_sum = MSSMT.total_sum(tree)  # Returns 150
 ```
 
-### Handling Binary Keys of Different Lengths
-
-```elixir
-tree = MSSMT.new()
-tree = MSSMT.insert(tree, <<1>>, 100)
-tree = MSSMT.insert(tree, <<1, 2>>, 200)
-tree = MSSMT.insert(tree, <<1, 2, 3>>, 300)
-
-MSSMT.get(tree, <<1>>)          # Returns 100
-MSSMT.get(tree, <<1, 2>>)       # Returns 200
-MSSMT.get(tree, <<1, 2, 3>>)    # Returns 300
-MSSMT.total_sum(tree)           # Returns 600
-```
-
 ### Generating and Verifying Proofs
 
 ```elixir
+key1 = :crypto.strong_rand_bytes(32)
+key2 = :crypto.strong_rand_bytes(32)
+key3 = :crypto.strong_rand_bytes(32)
 tree = MSSMT.new()
-tree = MSSMT.insert(tree, <<1>>, 100)
-tree = MSSMT.insert(tree, <<2>>, 200)
-tree = MSSMT.insert(tree, <<3>>, 300)
+tree = MSSMT.insert(tree, key1, "value1", 100)
+tree = MSSMT.insert(tree, key2, "value2", 200)
+tree = MSSMT.insert(tree, key3, "value3", 300)
+
+proof = MSSMT.generate_proof(tree, key1)
 
 root_hash = MSSMT.root_hash(tree)
-proof = MSSMT.generate_proof(tree, <<2>>)
 
 # Verify the proof
-is_valid = MSSMT.verify_proof(root_hash, <<2>>, 200, proof)  # Returns true
+is_valid = MSSMT.verify_proof(root_hash, key1, "value1", proof)  # Returns true
 
 # Verify with incorrect value
-is_valid = MSSMT.verify_proof(root_hash, <<2>>, 250, proof)  # Returns false
+is_valid = MSSMT.verify_proof(root_hash, key1, "value2", proof)  # Returns false
 
 # Verify with incorrect key
-is_valid = MSSMT.verify_proof(root_hash, <<4>>, 200, proof)  # Returns false
+is_valid = MSSMT.verify_proof(root_hash, key2, "value2", proof)  # Returns false
 ```
 
 ## API Reference
@@ -133,11 +120,13 @@ Inserts a key-value pair into the tree.
   - `tree`: The current tree.
   - `key`: A binary representing the key.
   - `value`: A numeric value associated with the key.
+  - `sum`: The sum of the value.
 
 **Example:**
 
 ```elixir
-tree = MSSMT.insert(tree, <<1, 2, 3>>, 100)
+key = :crypto.strong_rand_bytes(32)
+{:ok, tree} = MSSMT.insert(tree, key, "value1", 100)
 ```
 
 ---
@@ -150,29 +139,12 @@ Retrieves the value associated with a key.
   - `tree`: The current tree.
   - `key`: A binary representing the key.
 
-**Returns:** The value associated with the key, or `nil` if the key does not exist.
+**Returns:** The value and sum associated with the key, or `{:error, :not_found}` if the key does not exist.
 
 **Example:**
 
 ```elixir
-value = MSSMT.get(tree, <<1, 2, 3>>)
-```
-
----
-
-### MSSMT.update/3
-
-Updates the value associated with a key.
-
-- **Parameters:**
-  - `tree`: The current tree.
-  - `key`: A binary representing the key.
-  - `value`: The new numeric value to associate with the key.
-
-**Example:**
-
-```elixir
-tree = MSSMT.update(tree, <<1, 2, 3>>, 150)
+{:ok, retrieved_value, retrieved_sum} = MSSMT.get(tree, key)
 ```
 
 ---
@@ -188,7 +160,8 @@ Deletes a key-value pair from the tree.
 **Example:**
 
 ```elixir
-tree = MSSMT.delete(tree, <<1, 2, 3>>)
+key = :crypto.strong_rand_bytes(32)
+{:ok, tree} = MSSMT.delete(tree, key)
 ```
 
 ---
@@ -227,7 +200,7 @@ total_sum = MSSMT.total_sum(tree)
 
 ---
 
-### MSSMT.generate_proof/2
+### MSSMT.merkle_proof/2
 
 Generates a proof of inclusion for a given key.
 
@@ -240,7 +213,8 @@ Generates a proof of inclusion for a given key.
 **Example:**
 
 ```elixir
-proof = MSSMT.generate_proof(tree, <<1, 2, 3>>)
+key = :crypto.strong_rand_bytes(32)
+proof = MSSMT.merkle_proof(tree, key)
 ```
 
 ---
@@ -260,7 +234,8 @@ Verifies a proof of inclusion for a given key and value.
 **Example:**
 
 ```elixir
-is_valid = MSSMT.verify_proof(root_hash, <<1, 2, 3>>, 150, proof)
+key = :crypto.strong_rand_bytes(32)
+is_valid = MSSMT.verify_proof(root_hash, key, "value1", 100, proof)
 ```
 
 ## Development
