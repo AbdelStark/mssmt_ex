@@ -32,7 +32,7 @@ To use `mssmt` in your Elixir project, add it to your list of dependencies in `m
 ```elixir
 def deps do
   [
-    {:mssmt, git: "https://github.com/AbdelStark/mssmt.git", tag: "v0.1.0"}
+    {:mssmt, git: "https://github.com/AbdelStark/mssmt.git"}
   ]
 end
 ```

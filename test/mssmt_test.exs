@@ -67,8 +67,10 @@ defmodule MSSMTTest do
     tree = MSSMT.new()
     key1 = :crypto.strong_rand_bytes(32)
     key2 = :crypto.strong_rand_bytes(32)
+    key3 = :crypto.strong_rand_bytes(32)
     value1 = "value1"
     value2 = "value2"
+    value3 = "value3"
     sum1 = 100
     sum2 = 200
 
@@ -76,6 +78,10 @@ defmodule MSSMTTest do
     {:ok, tree} = MSSMT.insert(tree, key2, value2, sum2)
 
     assert MSSMT.total_sum(tree) == sum1 + sum2
+
+    sum3 = 300
+    {:ok, tree} = MSSMT.insert(tree, key3, value3, sum3)
+    assert MSSMT.total_sum(tree) == sum1 + sum2 + sum3
   end
 
   test "delete operation" do
